@@ -7,56 +7,62 @@
 #include <stdbool.h>
 
 static DWORD orig_out_mode = 0;
-static DWORD orig_in_mode = 0;
-static HWND hwnd = NULL;
+static UINT orig_cp = 0;
+static HWND target_hwnd = NULL;
 
-// Инициализация консоли: включаем ANSI-цвета и прячем курсор
 static inline void sys_init(void) {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
-
     GetConsoleMode(hOut, &orig_out_mode);
-    GetConsoleMode(hIn, &orig_in_mode);
 
-    // Врубаем Virtual Terminal Processing для ANSI-графики
+    // Включаем UTF-8 для красивых рамок бокала
+    orig_cp = GetConsoleOutputCP();
+    SetConsoleOutputCP(CP_UTF8);
+
+    // Включаем ANSI VT-последовательности
     DWORD out_mode = orig_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     SetConsoleMode(hOut, out_mode);
 
-    // Получаем хэндл окна терминала
-    hwnd = GetConsoleWindow();
+    // Берем активное окно (Alacritty / Windows Terminal)
+    target_hwnd = GetForegroundWindow();
 
     // Прячем курсор
     printf("\033[?25l");
     fflush(stdout);
 }
 
-// Восстановление консоли при выходе
 static inline void sys_cleanup(void) {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
-
-    // Показываем курсор обратно и сбрасываем цвета
     printf("\033[?25h\033[0m\n");
     fflush(stdout);
-
     SetConsoleMode(hOut, orig_out_mode);
-    SetConsoleMode(hIn, orig_in_mode);
+    SetConsoleOutputCP(orig_cp);
 }
 
-// Получить абсолютные координаты окна на рабочем столе (ВИНДА ДАЕТ ЭТО БЕЗ ПРОБЛЕМ)
 static inline void sys_get_window_pos(int *x, int *y) {
-    if (hwnd) {
+    if (!target_hwnd) target_hwnd = GetForegroundWindow();
+    if (target_hwnd) {
         RECT rect;
-        GetWindowRect(hwnd, &rect);
+        GetWindowRect(target_hwnd, &rect);
         *x = rect.left;
         *y = rect.top;
     } else {
-        *x = 0;
-        *y = 0;
+        *x = 0; *y = 0;
     }
 }
 
-// Размеры терминала в символах (колонок x строк)
+// Позиция курсора мыши на экране
+static inline void sys_get_cursor_pos(int *x, int *y) {
+    POINT pt;
+    GetCursorPos(&pt);
+    *x = pt.x;
+    *y = pt.y;
+}
+
+// Нажата ли левая кнопка мыши
+static inline bool sys_is_lbutton_down(void) {
+    return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+}
+
 static inline void sys_get_term_size(int *cols, int *rows) {
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
@@ -64,19 +70,8 @@ static inline void sys_get_term_size(int *cols, int *rows) {
     *rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
 }
 
-// Неблокирующая проверка нажатия клавиши
-static inline int sys_kbhit(void) {
-    return _kbhit();
-}
+static inline int sys_kbhit(void) { return _kbhit(); }
+static inline int sys_getch(void) { return _getch(); }
+static inline void sys_sleep_ms(int ms) { Sleep(ms); }
 
-// Считать символ без ожидания Enter
-static inline int sys_getch(void) {
-    return _getch();
-}
-
-// Сон в миллисекундах
-static inline void sys_sleep_ms(int ms) {
-    Sleep(ms);
-}
-
-#endif // WININCLUDE_H
+#endif
