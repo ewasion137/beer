@@ -6,50 +6,43 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <sys/time.h>
 #include <fcntl.h>
 #include <stdbool.h>
 
+#ifndef KEY_LEFT
+#define KEY_LEFT  1001
+#define KEY_RIGHT 1002
+#define KEY_UP    1003
+#define KEY_DOWN  1004
+#endif
+
 static struct termios orig_termios;
 
-// Инициализация: сырой режим ввода (raw mode) и прячем курсор
 static inline void sys_init(void) {
     tcgetattr(STDIN_FILENO, &orig_termios);
     struct termios raw = orig_termios;
-    
-    // Отключаем эхо и канонический режим (ловим клавиши на лету)
     raw.c_lflag &= ~(ECHO | ICANON);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-
-    // Прячем курсор
     printf("\033[?25l");
     fflush(stdout);
 }
 
-// Восстановление терминала
 static inline void sys_cleanup(void) {
     printf("\033[?25h\033[0m\n");
     fflush(stdout);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
-// Координаты окна (заглушка или xdotool, если нет линковки с Xlib)
-static inline void sys_get_window_pos(int *x, int *y) {
-    // В POSIX без костылей под конкретный WM сложно, пока заглушка 0,0
-    // (потом замутим через пайп к xdotool или сокет hyprland)
-    *x = 0;
-    *y = 0;
-}
-
-// Размеры терминала через ioctl
 static inline void sys_get_term_size(int *cols, int *rows) {
     struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    *cols = w.ws_col;
-    *rows = w.ws_row;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0 && w.ws_row > 0) {
+        *cols = w.ws_col;
+        *rows = w.ws_row;
+    }
 }
 
-// Неблокирующая проверка нажатия
 static inline int sys_kbhit(void) {
     struct timeval tv = {0L, 0L};
     fd_set fds;
@@ -58,16 +51,31 @@ static inline int sys_kbhit(void) {
     return select(1, &fds, NULL, NULL, &tv) > 0;
 }
 
-// Чтение символа
+// Читает клавишу; стрелки (ESC [ A/B/C/D) превращает в KEY_*
 static inline int sys_getch(void) {
-    char c = 0;
-    if (read(STDIN_FILENO, &c, 1) < 0) return 0;
+    unsigned char c = 0;
+    if (read(STDIN_FILENO, &c, 1) <= 0) return 0;
+    if (c == 27) {
+        if (!sys_kbhit()) return 27;
+        unsigned char s[2] = {0, 0};
+        if (read(STDIN_FILENO, &s[0], 1) <= 0) return 27;
+        if (s[0] == '[' || s[0] == 'O') {
+            if (read(STDIN_FILENO, &s[1], 1) <= 0) return 0;
+            switch (s[1]) {
+                case 'D': return KEY_LEFT;
+                case 'C': return KEY_RIGHT;
+                case 'A': return KEY_UP;
+                case 'B': return KEY_DOWN;
+            }
+            return 0;
+        }
+        return 27;
+    }
     return c;
 }
 
-// Сон
 static inline void sys_sleep_ms(int ms) {
-    usleep(ms * 1000);
+    usleep((useconds_t)ms * 1000);
 }
 
 #endif // POSIXINCLUDE_H
