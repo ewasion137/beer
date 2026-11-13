@@ -12,12 +12,6 @@
 #include "wininclude.h"
 #else
 #include "posixinclude.h"
-static inline void sys_get_cursor_pos(int *x, int *y) {
-    *x = 0;
-    *y = 0;
-}
-static inline bool sys_is_lbutton_down(void) { return false; }
-static inline bool sys_window_drag_update(void) { return false; }
 #endif
 
 #define MAX_COLS 300
@@ -212,6 +206,10 @@ int main(void) {
     int prev_mx = 0, prev_my = 0;
     sys_get_cursor_pos(&prev_mx, &prev_my);
 
+    int prev_wx = 0, prev_wy = 0;
+    bool prev_win_valid = sys_get_window_center(&prev_wx, &prev_wy);
+    bool was_mouse_active = false;
+
     float filt_vx = 0.0f, filt_vy = 0.0f;
     float prev_fvx = 0.0f, prev_fvy = 0.0f;
     float ax_s1 = 0.0f, ay_s1 = 0.0f;
@@ -220,7 +218,7 @@ int main(void) {
     float key_ax = 0.0f, key_ay = 0.0f;
 
     double last_time = sys_time_sec();
-    int last_cols = 0, last_rows = 0;
+    int last_cols = 0, last_rows = 0, prev_n = 0;
 
     while (running) {
         double now = sys_time_sec();
@@ -251,6 +249,16 @@ int main(void) {
             continue;
         }
 
+        if (prev_n > 0 && n > prev_n) {
+            for (int i = prev_n; i < n; i++) {
+                fluid_h[i] = 0.0f;
+                fluid_u[i] = 0.0f;
+                foam_col[i] = foam_col[prev_n - 1];
+            }
+            fluid_u[n] = 0.0f;
+        }
+        prev_n = n;
+
         frame++;
 
         int cur_mx = 0, cur_my = 0;
@@ -262,13 +270,28 @@ int main(void) {
 
         bool dragging = sys_window_drag_update();
         bool shaking = !dragging && sys_is_lbutton_down();
+        bool mouse_active = dragging || shaking;
+        if (mouse_active && !was_mouse_active) {
+            mouse_dx = 0;
+            mouse_dy = 0;
+        }
+        was_mouse_active = mouse_active;
 
-        float raw_vx = (dragging || shaking)
-                           ? ((float)mouse_dx / fmaxf(step_scale, 0.15f))
-                           : 0.0f;
-        float raw_vy = (dragging || shaking)
-                           ? ((float)mouse_dy / fmaxf(step_scale, 0.15f))
-                           : 0.0f;
+        int cur_wx = 0, cur_wy = 0;
+        bool has_win = sys_get_window_center(&cur_wx, &cur_wy);
+        int win_dx = (has_win && prev_win_valid) ? (cur_wx - prev_wx) : 0;
+        int win_dy = (has_win && prev_win_valid) ? (cur_wy - prev_wy) : 0;
+        if (has_win) {
+            prev_wx = cur_wx;
+            prev_wy = cur_wy;
+            prev_win_valid = true;
+        }
+
+        float drive_x = mouse_active ? (float)mouse_dx : (float)win_dx;
+        float drive_y = mouse_active ? (float)mouse_dy : (float)win_dy;
+
+        float raw_vx = drive_x / fmaxf(step_scale, 0.15f);
+        float raw_vy = drive_y / fmaxf(step_scale, 0.15f);
 
         float v_alpha = 1.0f - expf(-dt * 45.0f);
         filt_vx += v_alpha * (raw_vx - filt_vx);

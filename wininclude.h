@@ -170,6 +170,18 @@ static inline int sys_kbhit(void) {
     return 0;
 }
 
+static inline bool sys_get_window_center(int *x, int *y) {
+    HWND h = get_alacritty_hwnd();
+    if (!h || !IsWindow(h))
+        return false;
+    RECT r;
+    if (!GetWindowRect(h, &r))
+        return false;
+    *x = (r.left + r.right) / 2;
+    *y = (r.top + r.bottom) / 2;
+    return true;
+}
+
 static inline int sys_getch(void) {
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     INPUT_RECORD ir;
