@@ -51,7 +51,6 @@ static inline int sys_kbhit(void) {
     return select(1, &fds, NULL, NULL, &tv) > 0;
 }
 
-// Читает клавишу; стрелки (ESC [ A/B/C/D) превращает в KEY_*
 static inline int sys_getch(void) {
     unsigned char c = 0;
     if (read(STDIN_FILENO, &c, 1) <= 0) return 0;
@@ -78,4 +77,4 @@ static inline void sys_sleep_ms(int ms) {
     usleep((useconds_t)ms * 1000);
 }
 
-#endif // POSIXINCLUDE_H
+#endif
