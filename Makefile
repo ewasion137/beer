@@ -1,5 +1,8 @@
 CC = gcc
 CFLAGS = -O3 -Wall -std=c99
+LDFLAGS ?=
+PREFIX ?= /usr/local
+DESTDIR ?=
 
 ifeq ($(OS),Windows_NT)
 	TARGET = beer.exe
@@ -16,15 +19,22 @@ endif
 all: $(BUILD_RULE)
 
 windows:
-	$(CC) $(CFLAGS) beer.c -o beer.exe -luser32 -lwinmm
+	$(CC) $(CFLAGS) beer.c -o beer.exe $(LDFLAGS) -luser32 -lwinmm
 
 posix:
-	$(CC) $(CFLAGS) beer.c -o beer -lm
+	$(CC) $(CFLAGS) beer.c -o beer $(LDFLAGS) -lm
 
-run:
+install: posix
+	install -d "$(DESTDIR)$(PREFIX)/bin"
+	install -m 755 beer "$(DESTDIR)$(PREFIX)/bin/beer"
+
+uninstall:
+	rm -f "$(DESTDIR)$(PREFIX)/bin/beer"
+
+run: all
 	$(RUN_CMD)
 
 clean:
 	$(RM_CMD)
 
-.PHONY: all windows posix run clean
+.PHONY: all windows posix install uninstall run clean
