@@ -9,8 +9,6 @@
 
 __declspec(dllimport) UINT WINAPI timeBeginPeriod(UINT uPeriod);
 __declspec(dllimport) UINT WINAPI timeEndPeriod(UINT uPeriod);
-#include <mmsystem.h>
-
 
 #ifndef KEY_LEFT
 #define KEY_LEFT 1001
@@ -50,6 +48,24 @@ static inline bool window_is_foreground(HWND h) {
     return (root ? root : fg) == h;
 }
 
+static inline bool window_is_fullscreen_or_max(HWND h) {
+    if (IsZoomed(h))
+        return true;
+    RECT r;
+    if (!GetWindowRect(h, &r))
+        return false;
+    HMONITOR mon = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi;
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfo(mon, &mi)) {
+        if (r.left <= mi.rcMonitor.left && r.top <= mi.rcMonitor.top &&
+            r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static inline void sys_init(void) {
     SetProcessDPIAware();
     timeBeginPeriod(1);
@@ -75,7 +91,7 @@ static inline void sys_init(void) {
     FlushConsoleInputBuffer(hIn);
     get_alacritty_hwnd();
 
-    printf("\033[?25l");
+    printf("\033[?25l\033[?1002h\033[?1006h\033[?7l");
     fflush(stdout);
 }
 
@@ -83,7 +99,7 @@ static inline void sys_cleanup(void) {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
 
-    printf("\033[?25h\033[0m\n");
+    printf("\033[?7h\033[?1006l\033[?1002l\033[?25h\033[0m\n");
     fflush(stdout);
 
     SetConsoleMode(hOut, orig_out_mode);
@@ -108,10 +124,22 @@ static inline void sys_get_cursor_pos(int *x, int *y) {
     *y = pt.y;
 }
 
+static inline bool sys_get_window_center(int *x, int *y) {
+    HWND h = get_alacritty_hwnd();
+    if (!h || !IsWindow(h))
+        return false;
+    RECT r;
+    if (!GetWindowRect(h, &r))
+        return false;
+    *x = (r.left + r.right) / 2;
+    *y = (r.top + r.bottom) / 2;
+    return true;
+}
+
 static inline bool sys_window_drag_update(void) {
     bool down = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
     HWND h = get_alacritty_hwnd();
-    if (!down || !h || !IsWindow(h)) {
+    if (!down || !h || !IsWindow(h) || window_is_fullscreen_or_max(h)) {
         drag_active = false;
         return false;
     }
@@ -140,7 +168,12 @@ static inline bool sys_is_lbutton_down(void) {
     HWND h = get_alacritty_hwnd();
     if (!h || !window_is_foreground(h))
         return false;
-    return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    if (GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+        return true;
+    if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) &&
+        window_is_fullscreen_or_max(h))
+        return true;
+    return false;
 }
 
 static inline void sys_get_term_size(int *cols, int *rows) {
@@ -168,18 +201,6 @@ static inline int sys_kbhit(void) {
     }
     FlushConsoleInputBuffer(hIn);
     return 0;
-}
-
-static inline bool sys_get_window_center(int *x, int *y) {
-    HWND h = get_alacritty_hwnd();
-    if (!h || !IsWindow(h))
-        return false;
-    RECT r;
-    if (!GetWindowRect(h, &r))
-        return false;
-    *x = (r.left + r.right) / 2;
-    *y = (r.top + r.bottom) / 2;
-    return true;
 }
 
 static inline int sys_getch(void) {

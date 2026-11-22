@@ -15,7 +15,6 @@
 #include <termios.h>
 #include <unistd.h>
 
-
 #ifndef KEY_LEFT
 #define KEY_LEFT 1001
 #define KEY_RIGHT 1002
