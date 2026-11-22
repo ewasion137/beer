@@ -691,6 +691,12 @@ static inline int sys_getch(void) {
     return k;
 }
 
+static inline bool sys_writer_busy(void) { return false; }
+static inline void sys_present(const char *data, int len) {
+    fwrite(data, 1, (size_t)len, stdout);
+    fflush(stdout);
+}
+
 static inline void sys_sleep_ms(int ms) { usleep((useconds_t)ms * 1000); }
 
 #endif

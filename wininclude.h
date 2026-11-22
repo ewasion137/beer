@@ -26,6 +26,55 @@ static bool drag_active = false;
 static POINT drag_cur0;
 static RECT drag_rect0;
 
+static char writer_buf[4 * 1024 * 1024];
+static int writer_len = 0;
+static volatile LONG writer_busy = 0;
+static volatile LONG writer_quit = 0;
+static HANDLE writer_ev = NULL;
+static HANDLE writer_thread = NULL;
+static HANDLE writer_hOut = NULL;
+
+static DWORD WINAPI writer_proc(LPVOID arg) {
+    (void)arg;
+    for (;;) {
+        WaitForSingleObject(writer_ev, INFINITE);
+        if (InterlockedCompareExchange(&writer_quit, 0, 0))
+            break;
+        if (InterlockedCompareExchange(&writer_busy, 0, 0)) {
+            int off = 0;
+            while (off < writer_len) {
+                DWORD written = 0;
+                if (!WriteFile(writer_hOut, writer_buf + off,
+                               (DWORD)(writer_len - off), &written, NULL) ||
+                    written == 0) {
+                    break;
+                }
+                off += (int)written;
+            }
+            InterlockedExchange(&writer_busy, 0);
+        }
+    }
+    return 0;
+}
+
+static inline bool sys_writer_busy(void) {
+    return InterlockedCompareExchange(&writer_busy, 0, 0) != 0;
+}
+
+static inline void sys_present(const char *data, int len) {
+    if (!writer_thread) {
+        fwrite(data, 1, (size_t)len, stdout);
+        fflush(stdout);
+        return;
+    }
+    if (len > (int)sizeof(writer_buf))
+        len = (int)sizeof(writer_buf);
+    memcpy(writer_buf, data, (size_t)len);
+    writer_len = len;
+    InterlockedExchange(&writer_busy, 1);
+    SetEvent(writer_ev);
+}
+
 static inline HWND get_alacritty_hwnd(void) {
     if (target_hwnd && IsWindow(target_hwnd))
         return target_hwnd;
@@ -91,15 +140,33 @@ static inline void sys_init(void) {
     FlushConsoleInputBuffer(hIn);
     get_alacritty_hwnd();
 
-    printf("\033[?25l\033[?1002h\033[?1006h\033[?7l");
+    printf("\033[?1049h\033[?25l\033[?7l\033[2J");
     fflush(stdout);
+
+    writer_hOut = hOut;
+    InterlockedExchange(&writer_busy, 0);
+    InterlockedExchange(&writer_quit, 0);
+    writer_ev = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (writer_ev) {
+        writer_thread = CreateThread(NULL, 0, writer_proc, NULL, 0, NULL);
+    }
 }
 
 static inline void sys_cleanup(void) {
+    if (writer_thread) {
+        InterlockedExchange(&writer_quit, 1);
+        SetEvent(writer_ev);
+        WaitForSingleObject(writer_thread, 150);
+        CloseHandle(writer_thread);
+        CloseHandle(writer_ev);
+        writer_thread = NULL;
+        writer_ev = NULL;
+    }
+
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
 
-    printf("\033[?7h\033[?1006l\033[?1002l\033[?25h\033[0m\n");
+    printf("\033[?7h\033[?25h\033[?1049l\033[0m\n");
     fflush(stdout);
 
     SetConsoleMode(hOut, orig_out_mode);
@@ -137,7 +204,9 @@ static inline bool sys_get_window_center(int *x, int *y) {
 }
 
 static inline bool sys_window_drag_update(void) {
-    bool down = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+    bool alt_lmb = ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) &&
+                   ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
+    bool down = ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0) || alt_lmb;
     HWND h = get_alacritty_hwnd();
     if (!down || !h || !IsWindow(h) || window_is_fullscreen_or_max(h)) {
         drag_active = false;

@@ -190,10 +190,9 @@ static void flush_grid(int cols, int rows, bool full_redraw) {
 
     if (buf_len > 0) {
         buf_write("\033[0m");
-        fwrite(frame_buf, 1, (size_t)buf_len, stdout);
-        fflush(stdout);
+        sys_present(frame_buf, buf_len);
     }
-}
+  }
 
 typedef struct {
     float x, y, vy, phase;
@@ -285,6 +284,9 @@ int main(void) {
     double last_time = sys_time_sec();
     int last_cols = 0, last_rows = 0, prev_n = 0;
 
+    /* FIX: помним, что нужен полный редрав, даже если кадр пропущен */
+    bool need_full = false;
+
     while (running) {
         double now = sys_time_sec();
         float dt = clampf((float)(now - last_time), 0.002f, 0.05f);
@@ -304,6 +306,8 @@ int main(void) {
             last_cols = cols;
             last_rows = rows;
         }
+        if (full_redraw)
+            need_full = true;
 
         int ocean_top = 1;
         int ocean_bottom = rows;
@@ -815,7 +819,12 @@ int main(void) {
                      COL_DEF, msg, cols, rows);
         }
 
-        flush_grid(cols, rows, full_redraw);
+        /* FIX: не блокируемся на выводе. Если писатель занят (окно тащат и
+           терминал не читает), пропускаем кадр, физика продолжает крутиться. */
+        if (!sys_writer_busy()) {
+            flush_grid(cols, rows, need_full);
+            need_full = false;
+        }
         sys_sleep_ms(14);
     }
 
