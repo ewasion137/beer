@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc
+      - name: Build Windows binary
+        shell: msys2 {0}
+        run: |
+          gcc -O3 -Wall -std=c99 -static beer.c -o beer-windows-x64.exe -luser32 -lwinmm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: beer-windows-x64.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux binary and .deb
+        run: |
+          make posix
+          tar -czf beer-linux-x86_64.tar.gz beer LICENSE README.md
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p deb/usr/bin deb/DEBIAN
+          cp beer deb/usr/bin/beer
+          chmod 755 deb/usr/bin/beer
+          cat > deb/DEBIAN/control <<EOF
+          Package: beer
+          Version: ${VER}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: ewasion137
+          Description: Terminal beer physics simulator
+          EOF
+          dpkg-deb --build deb "beer_${VER}_amd64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            beer-linux-x86_64.tar.gz
+            beer_*.deb
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build macOS universal binary
+        run: |
+          clang -O3 -Wall -std=c99 -arch arm64 -arch x86_64 beer.c -o beer -lm
+          tar -czf beer-macos-universal.tar.gz beer LICENSE README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: beer-macos-universal.tar.gz
+
+  publish:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
