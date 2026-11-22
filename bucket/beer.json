@@ -1,0 +1,21 @@
+{
+    "version": "1.0.0",
+    "description": "Terminal beer physics simulator with wave dynamics and window tracking",
+    "homepage": "https://github.com/ewasion137/beer",
+    "license": "GPL-3.0-or-later",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ewasion137/beer/releases/download/v1.0.0/beer-windows-x64.exe#/beer.exe",
+            "hash": "6cddb1124627e66d670f0c4afb562a06ee08f104badadcd6da9abba8c58403dc"
+        }
+    },
+    "bin": "beer.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ewasion137/beer/releases/download/v$version/beer-windows-x64.exe#/beer.exe"
+            }
+        }
+    }
+}
